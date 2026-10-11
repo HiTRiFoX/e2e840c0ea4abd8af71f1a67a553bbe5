@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>HDVB Resolver</title>
+</head>
+<body>
+<script>
+window.addEventListener('message', async function(e) {
+    if (!e.data || !e.data.url) return;
+    var targetUrl = e.data.url;
+    
+    try {
+        // Step 1: fetch HDVB iframe (browser sends Origin automatically)
+        var res1 = await fetch(targetUrl);
+        if (!res1.ok) {
+            window.parent.postMessage({ ok: false, error: 'HDVB HTTP ' + res1.status }, '*');
+            return;
+        }
+        var html = await res1.text();
+        var p2aMatch = html.match(/let\s+p2aCon\s*=\s*(\{[\s\S]*?\});/);
+        if (!p2aMatch) {
+            window.parent.postMessage({ ok: false, error: 'p2aCon not found' }, '*');
+            return;
+        }
+        var p2a = JSON.parse(p2aMatch[1]);
+        var cleanFile = p2a.file.replace(/^[~#]/, '');
+        var plUrl = 'https://vid11.' + p2a.href + '/playlist/' + cleanFile + '.txt';
+
+        // Step 2: fetch playlist with CSRF token
+        var res2 = await fetch(plUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-TOKEN': p2a.key
+            }
+        });
+        if (!res2.ok) {
+            window.parent.postMessage({ ok: false, error: 'Playlist HTTP ' + res2.status }, '*');
+            return;
+        }
+        var stream = (await res2.text()).trim();
+        if (stream.includes('.m3u8') || stream.includes('.mp4')) {
+            window.parent.postMessage({ ok: true, stream: stream }, '*');
+        } else {
+            window.parent.postMessage({ ok: false, error: 'HDVB response: ' + stream }, '*');
+        }
+    } catch(err) {
+        window.parent.postMessage({ ok: false, error: err.message }, '*');
+    }
+});
+</script>
+</body>
+</html>
+
